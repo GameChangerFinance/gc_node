@@ -15,6 +15,12 @@ services:
       - node-ipc:/opt/cardano/cnode/sockets
       - node-cfg:/opt/cardano/cnode/priv/files
       - ./scripts/:/scripts/
+    entrypoint: >
+      /bin/sh -c "
+      echo 'Exporting node config files into node-cfg volume...' ;
+      cp /opt/cardano/cnode/files/* /opt/cardano/cnode/priv/files/* ;
+      ./entrypoint.sh ;
+      "
     restart: on-failure
     healthcheck:
       test: ["CMD-SHELL", "netstat -ntlp | grep 12798"]
@@ -62,6 +68,26 @@ services:
         max-size: "200k"
         max-file: "10"
 
+  # TODO: add http backend ogmios and it's entry on /configs/haproxy/haproxy.cfg
+  ogmios:
+    image: cardanosolutions/ogmios:${OGMIOS_VERSION:-latest}
+    restart: on-failure
+    command: [
+      "--host", "0.0.0.0",
+      "--node-socket", "/ipc/node.socket",
+      "--node-config", "/opt/cardano/cnode/files/config.json"
+    ]
+    volumes:
+      # exported automagically from cardano-node
+      - node-cfg:/opt/cardano/cnode/files/
+      - node-ipc:/ipc
+    ports:
+      - ${OGMIOS_PORT:-1337}:1337
+    depends_on:
+      cardano-node:
+        condition: service_healthy
+
+
   postgress:
     image: postgres:16.1-bullseye
     hostname: postgress
@@ -99,17 +125,34 @@ services:
     environment:
       PGRST_DB_URI: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgress:${POSTGRES_PORT}/${POSTGRES_DB}
       PGRST_DB_ANON_ROLE: ${PGRST_DB_ANON_ROLE}
-      PGRST_DB_SCHEMA: ${RPC_SCHEMA}
+      #PGRST_DB_SCHEMA: ${RPC_SCHEMA}
+      PGRST_DB_SCHEMAS: "public, ${RPC_SCHEMA}" # first one is default
       PGRST_SERVER_PORT: 8050
       PGRST_OPENAPI_SERVER_PROXY_URI: http://0.0.0.0:8050
       PGRST_DB_MAX_ROWS: 1000
       PGRST_DB_AGGREGATES_ENABLED: true
+      PGRST_DB_EXTRA_SEARCH_PATH: "public, ${RPC_SCHEMA}"
     restart: on-failure
     logging:
       driver: "json-file"
       options:
         max-size: "200k"
         max-file: "10"
+
+  unimatrix:
+    image: unimatrix-peer:latest
+    build:
+      context: ./src/unimatrix
+    restart: always
+    environment:
+      - UNIMATRIX_PORT:${UNIMATRIX_PORT:-8765}
+    # static http server can be exposed as well
+    ports:
+      - ${UNIMATRIX_PORT:-8765}:8765
+    # TODO: fix env vars passing and link to persistent volume
+    volumes:
+      - unimatrix-data:/work/data
+
 
   portainer-agent:
     image: portainer/agent:latest
@@ -135,14 +178,53 @@ services:
       - portainer-agent
 
   # Develpoment and Testing
-  # swagger:
-  #   image: swaggerapi/swagger-ui
-  #   ports:
-  #     - "8080:8080"
-  #   expose:
-  #     - "8080"
-  #   environment:
-  #     API_URL: http://127.0.0.1:8050/
+  swagger:
+    image: swaggerapi/swagger-ui
+    ports:
+      - "8080:8080"
+    expose:
+      - "8080"
+    environment:
+      API_URL: http://127.0.0.1:8050/
+
+
+
+  pgadmin:
+    image: dpage/pgadmin4
+    restart: always
+    environment:
+        PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+        PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+        PGADMIN_LISTEN_PORT: 80
+    ports:
+        - "${PGADMIN_LISTEN_PORT:-5050}:80"
+    links:
+        - "postgress:pgsql-server"
+    volumes:
+        - pgadmin-data:/var/lib/pgadmin
+    # not supported until docker compose 2.23.1
+    # configs:
+    #   - source: pgadmin_server
+    #     target: /var/lib/pgadmin/servers.json
+    entrypoint: >
+      /bin/sh -c "
+      EMAIL_SANITIZED=$$(echo \"$PGADMIN_DEFAULT_EMAIL\" | tr @ _)
+      mkdir -p /var/lib/pgadmin/storage/${EMAIL_SANITIZED} ;
+      PGADMIN_SERVER_JSON_FILE=/var/lib/pgadmin/storage/servers.json ;
+      PGADMIN_PASSWORD_FILE=/var/lib/pgadmin/storage/${EMAIL_SANITIZED}/pgpass ;
+      rm -rf $$PGADMIN_PASSWORD_FILE ;
+      rm -rf $$PGADMIN_SERVER_JSON_FILE ;
+      echo '${PGADMIN_DEFAULT_PASSWORD}' > $$PGADMIN_PASSWORD_FILE ;
+      echo '{\"Servers\": {\"1\": { \"Group\": \"Servers\", \"Name\": \"${NETWORK}\", \"Host\": \"${PROJ_NAME}-postgres-1\", \"Port\": ${POSTGRES_PORT}, \"MaintenanceDB\": \"${POSTGRES_DB}\",  \"Username\": \"${POSTGRES_USER}\",  \"ConnectionParameters\": {  \"sslmode\": \"prefer\", \"connect_timeout\": 10, \"passfile\": \"/var/lib/pgadmin/storage/$EMAIL_SANITIZED/pgpass\" } }}}' > $$PGADMIN_SERVER_JSON_FILE ;
+      chmod 600 $$PGADMIN_PASSWORD_FILE ;
+      chmod 600 $$PGADMIN_SERVER_JSON_FILE ;
+      echo 'Default Config file' ;
+      cat $$PGADMIN_SERVER_JSON_FILE ;
+      PGADMIN_SERVER_JSON_FILE=$$PGADMIN_SERVER_JSON_FILE /entrypoint.sh;
+      "
+    depends_on:
+      postgress:
+        condition: service_healthy
 
 
   haproxy:
@@ -184,6 +266,12 @@ services:
     # - ./logs:/var/log
     restart: unless-stopped
 
+# not supported until docker compose 2.23.1
+# configs:
+#   pgadmin_server:
+#     environment: PGADMIN_SERVER
+#     content: '{"Servers": {"1": { "Group": "Servers", "Name": "${NETWORK}", "Host": "${PROJ_NAME}-postgres-1", "Port": ${POSTGRES_PORT}, "MaintenanceDB": "${POSTGRES_DB}",  "Username": ${POSTGRES_USER},  "ConnectionParameters": {  "sslmode": "prefer", "connect_timeout": 10, "passfile": "/pgpass" } }}}'
+
 volumes:
   node-db:
   node-ipc:
@@ -191,3 +279,5 @@ volumes:
   db-sync-data:
   postgresdb:
   portainer-data:
+  pgadmin-data:
+  unimatrix-data:
