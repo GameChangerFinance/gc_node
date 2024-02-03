@@ -433,7 +433,7 @@ menu() {
                         read -r -p "Press enter to continue"
                     else
                         # Executing commands in the found container
-                        docker exec -it -u postgres "$container_id" bash -c "/scripts/kltables.sh > /scripts/TablesAndIndexesList.txt"
+                        docker exec -it -u postgres "$container_id" bash -c "/scripts/klTablesAndIndexes.sh" > scripts/TablesAndIndexesList.txt
                         echo "TablesAndIndexesList.txt File created in your script folder."
                     fi
                     show_splash_screen
@@ -549,7 +549,7 @@ menu() {
               ;;
 
             "Advanced")
-              setup_choice=$(gum choose --height 15 --cursor.foreground 229 --item.foreground 39 "$(gum style --foreground 82  "Enter Cardano Node")" "$(gum style --foreground 85  "Logs Cardano Node")" "$(gum style --foreground 82 "Enter Postgres")" "$(gum style --foreground 85 "Logs Postgres")" "$(gum style --foreground 82 "Enter Dbsync")" "$(gum style --foreground 85 "Logs Dbsync")" "$(gum style --foreground 85 "Logs PostgREST")" "$(gum style --foreground 82 "Enter HAProxy")" "$(gum style --foreground 85 "Logs HAProxy")" "$(gum style --foreground 208 "Back")")
+              setup_choice=$(gum choose --height 15 --cursor.foreground 229 --item.foreground 39 "$(gum style --foreground 82  "Enter Cardano Node")" "$(gum style --foreground 85  "Logs Cardano Node")" "$(gum style --foreground 82 "Enter Postgres")" "$(gum style --foreground 85 "Logs Postgres")" "$(gum style --foreground 82 "Enter Dbsync")" "$(gum style --foreground 85 "Logs Dbsync")" "$(gum style --foreground 85 "Logs PostgREST")" "$(gum style --foreground 82 "Enter HAProxy")" "$(gum style --foreground 85 "Logs HAProxy")" "$(gum style --foreground 82 "Enter Ogmios")" "$(gum style --foreground 85 "Logs Ogmios")" "$(gum style --foreground 85 "Logs Unimatrix")" "$(gum style --foreground 160 "REMOVE Postgres DB Volume")" "$(gum style --foreground 208 "Back")")
               case "$setup_choice" in
                 "Enter Cardano Node")
                   # Enter
@@ -661,6 +661,69 @@ menu() {
                     # Logs
                     docker logs "$container_id" | more
                     read -r -p "End of logs reached, press enter to continue"
+                  fi
+                  show_splash_screen
+                  ;;
+                "Enter Ogmios")
+                  # Logic for Enter Ogmios
+                  service_name="ogmios"
+                  container_id=$(docker ps -qf "name=${PROJ_NAME}-${service_name}")
+                  if [ -z "$container_id" ]; then
+                    echo "No running Ogmios container found."
+                    read -r -p "Press enter to continue"
+                  else
+                    # Executing commands in the found container
+                    docker exec -it "$container_id" bash -c "bash"
+                  fi
+                  show_splash_screen
+                  ;;
+                "Logs Ogmios")
+                  # Logic for Logs Ogmios
+                  service_name="ogmios"
+                  container_id=$(docker ps -qf "name=${PROJ_NAME}-${service_name}")
+                  if [ -z "$container_id" ]; then
+                    echo "No running Ogmios container found."
+                    read -r -p "Press enter to continue"
+                  else
+                    # Logs
+                    docker logs "$container_id" | more
+                    read -r -p "End of logs reached, press enter to continue"
+                  fi
+                  show_splash_screen
+                  ;;
+                "Logs Unimatrix")
+                  # Logic for Logs Ogmios
+                  service_name="unimatrix"
+                  container_id=$(docker ps -qf "name=${PROJ_NAME}-${service_name}")
+                  if [ -z "$container_id" ]; then
+                    echo "No running Unimatrix container found."
+                    read -r -p "Press enter to continue"
+                  else
+                    # Logs
+                    docker logs "$container_id" | more
+                    read -r -p "End of logs reached, press enter to continue"
+                  fi
+                  show_splash_screen
+                  ;;
+                "REMOVE Postgres DB Volume")
+                  # Logic for Remove Postgres DB Volume
+                  postgress_container_id=$(docker ps -qf "name=${PROJ_NAME}-postgress")
+                  if [ -z "$postgress_container_id" ]; then
+
+                    dbsync_container_id=$(docker ps -qf "name=${PROJ_NAME}-cardano-db-sync")
+                    if [ -z "$dbsync_container_id" ]; then
+                      echo "REMOVING Postgres DB Volume..."
+                      docker volume rm ${PROJ_NAME}_postgresdb
+                      read -r -p "Press enter to continue"
+                    else
+                      echo "Running Dbsync container found. Down all containers first."
+                      read -r -p "Press enter to continue"
+                    fi
+
+                  else
+                    # Logs
+                    echo "Running Postgres DB container found. Down all containers first."
+                    read -r -p "Press enter to continue"
                   fi
                   show_splash_screen
                   ;;
